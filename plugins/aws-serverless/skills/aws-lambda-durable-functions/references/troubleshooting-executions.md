@@ -2,6 +2,8 @@
 
 **PROACTIVE AGENT**: When users report issues with durable function executions, spawn a specialized troubleshooting agent.
 
+**Supported Languages**: TypeScript, Python, Java
+
 ## When to Spawn Troubleshooting Agent
 
 Spawn the agent when users mention:
@@ -40,6 +42,10 @@ Steps:
    - Timeout: Calculate total duration, identify slow operations
    - Unexpected behavior: Compare operation order with expected flow
 7. Provide specific recommendations and next steps
+8. Consider language-specific debugging:
+   - TypeScript: Check async/await patterns and promise handling
+   - Python: Verify @durable_step decorators and lambda usage
+   - Java: Check exception handling and type specifications in step() calls
 
 Use jq for JSON parsing and analysis.
 ```

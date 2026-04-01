@@ -53,6 +53,20 @@ const result = await context.step('fetch-user', async () => {
 
 **Best Practice:** Always name steps for easier debugging and testing.
 
+### Java: Type-Safe Steps
+
+**Java:**
+
+```java
+var result = ctx.step("fetch-user", UserData.class, stepCtx -> fetchUserFromAPI(userId));
+```
+
+**Key differences:**
+
+- Must specify return type (e.g., `UserData.class`)
+- Use `TypeToken` for generic types like `List<T>`
+- Always name steps for debugging
+
 ## Retry Configuration
 
 ### Exponential Backoff
@@ -96,6 +110,24 @@ result = context.step(
     func=api_call(),
     config=StepConfig(retry_strategy=create_retry_strategy(retry_config))
 )
+```
+
+**Java:**
+
+```java
+import software.amazon.lambda.durable.retries.RetryStrategies;
+import software.amazon.lambda.durable.config.StepConfig;
+import software.amazon.lambda.durable.retries.JitterStrategy;
+
+var result = ctx.step("api-call", ApiResponse.class, stepCtx -> callExternalAPI(),
+    StepConfig.builder()
+        .retryStrategy(RetryStrategies.exponentialBackoff(b -> b
+            .maxAttempts(5)
+            .initialDelay(Duration.ofSeconds(1))
+            .maxDelay(Duration.ofSeconds(60))
+            .backoffRate(2.0)
+            .jitter(JitterStrategy.FULL)))
+        .build());
 ```
 
 ### Custom Retry Strategy
@@ -150,6 +182,23 @@ result = context.step(
 )
 ```
 
+**Java:**
+
+```java
+import software.amazon.lambda.durable.retries.RetryDecision;
+
+var result = ctx.step("custom-retry", Result.class, stepCtx -> riskyOperation(),
+    StepConfig.builder()
+        .retryStrategy((error, attemptCount) -> {
+            if (error instanceof ValidationException) return RetryDecision.noRetry();
+            if (attemptCount < 3) {
+                return RetryDecision.retryAfter(Duration.ofSeconds((long) Math.pow(2, attemptCount)));
+            }
+            return RetryDecision.noRetry();
+        })
+        .build());
+```
+
 ### Retryable Error Types
 
 **TypeScript:**
@@ -174,6 +223,17 @@ retry_config = RetryStrategyConfig(
     max_attempts=3,
     retryable_error_types=[NetworkError, TimeoutError]
 )
+```
+
+**Java:**
+
+```java
+var result = ctx.step("selective-retry", Result.class, stepCtx -> operation(),
+    StepConfig.builder()
+        .retryStrategy(RetryStrategies.exponentialBackoff(b -> b
+            .maxAttempts(3)
+            .retryableExceptions(NetworkException.class, TimeoutException.class)))
+        .build());
 ```
 
 ## Step Semantics
@@ -215,6 +275,21 @@ result = context.step(
     charge_card(amount),
     config=StepConfig(step_semantics=StepSemantics.AT_MOST_ONCE_PER_RETRY)
 )
+```
+
+**Java:**
+
+```java
+import software.amazon.lambda.durable.config.StepSemantics;
+
+// AT_LEAST_ONCE (default) - may execute multiple times on failure/retry
+var result = ctx.step("idempotent-op", Result.class, stepCtx -> idempotentAPI());
+
+// AT_MOST_ONCE - never retries, use for non-idempotent operations
+var payment = ctx.step("charge-payment", PaymentResult.class, stepCtx -> chargeCard(amount),
+    StepConfig.builder()
+        .stepSemantics(StepSemantics.AT_MOST_ONCE_PER_RETRY)
+        .build());
 ```
 
 ## Custom Serialization
@@ -262,6 +337,18 @@ user = context.step(
 )
 ```
 
+**Java:**
+
+```java
+import software.amazon.lambda.durable.TypeToken;
+
+// Use TypeToken for generic types like List<T>
+var users = ctx.step("fetch-users", new TypeToken<List<User>>() {}, stepCtx -> fetchAllUsers());
+
+// For simple types, use .class
+var user = ctx.step("fetch-user", User.class, stepCtx -> new User("123", "Alice", Instant.now()));
+```
+
 ## When to Use Steps vs Child Contexts
 
 ### Use Steps For:
@@ -292,6 +379,23 @@ await context.runInChildContext('process', async (childCtx) => {
   const data = await childCtx.step('fetch', async () => fetch());
   await childCtx.wait({ seconds: 1 });
   return await childCtx.step('save', async () => save(data));
+});
+```
+
+**Java:**
+
+```java
+// ❌ WRONG: Cannot nest durable operations in step
+ctx.step("process", Result.class, stepCtx -> {
+    ctx.wait("delay", Duration.ofSeconds(1));  // ERROR!
+    return result;
+});
+
+// ✅ CORRECT: Use child context
+var result = ctx.runInChildContext("process", ProcessResult.class, childCtx -> {
+    var data = childCtx.step("fetch", Data.class, s -> fetchData());
+    childCtx.wait("processing-delay", Duration.ofSeconds(1));
+    return childCtx.step("save", SaveResult.class, s -> save(data));
 });
 ```
 
@@ -334,6 +438,23 @@ except DurableExecutionsError as error:
     context.logger.error('SDK error: %s', str(error))
 except Exception as error:
     context.logger.error('Application error: %s', str(error))
+```
+
+**Java:**
+
+```java
+import software.amazon.lambda.durable.exception.StepFailedException;
+import software.amazon.lambda.durable.exception.StepInterruptedException;
+
+try {
+    var result = ctx.step("risky", Result.class, stepCtx -> riskyOperation());
+} catch (StepFailedException e) {
+    ctx.getLogger().error("Step permanently failed: {}", e.getMessage());
+    // Handle or rethrow
+} catch (StepInterruptedException e) {
+    ctx.getLogger().error("Step interrupted: {}", e.getMessage());
+    // Handle or rethrow
+}
 ```
 
 ## Best Practices

@@ -55,6 +55,24 @@ result = context.step(
 )
 ```
 
+**Java:**
+
+```java
+import software.amazon.lambda.durable.retries.RetryStrategies;
+import software.amazon.lambda.durable.retries.JitterStrategy;
+import software.amazon.lambda.durable.config.StepConfig;
+
+var result = ctx.step("api-call", ApiResponse.class, stepCtx -> callAPI(),
+    StepConfig.builder()
+        .retryStrategy(RetryStrategies.exponentialBackoff(b -> b
+            .maxAttempts(5)
+            .initialDelay(Duration.ofSeconds(1))
+            .maxDelay(Duration.ofSeconds(60))
+            .backoffRate(2.0)
+            .jitter(JitterStrategy.FULL)))
+        .build());
+```
+
 ## Custom Retry Logic
 
 **TypeScript:**
@@ -100,6 +118,21 @@ def custom_retry(error: Exception, attempt: int) -> RetryDecision:
     return RetryDecision(should_retry=False)
 ```
 
+**Java:**
+
+```java
+var result = ctx.step("custom-retry", Result.class, stepCtx -> riskyOperation(),
+    StepConfig.builder()
+        .retryStrategy((error, attemptCount) -> {
+            if (error instanceof ClientException) return RetryDecision.noRetry();
+            if (attemptCount < 5) {
+                return RetryDecision.retryAfter(Duration.ofSeconds((long) Math.pow(2, attemptCount)));
+            }
+            return RetryDecision.noRetry();
+        })
+        .build());
+```
+
 ## Error Classification
 
 ### Retryable vs Non-Retryable
@@ -135,6 +168,18 @@ retry_config = RetryStrategyConfig(
     max_attempts=3,
     retryable_error_types=[NetworkError, TimeoutError]
 )
+```
+
+**Java:**
+
+```java
+var result = ctx.step("selective-retry", Result.class, stepCtx -> operation(),
+    StepConfig.builder()
+        .retryStrategy(RetryStrategies.exponentialBackoff(b -> b
+            .maxAttempts(3)
+            .retryableExceptions(NetworkException.class, TimeoutException.class)))
+        .build());
+// ValidationException won't be retried
 ```
 
 ## Saga Pattern
@@ -232,6 +277,47 @@ def handler(event: dict, context: DurableContext) -> dict:
         raise error
 ```
 
+**Java:**
+
+```java
+public class OrderHandler extends DurableHandler<OrderRequest, OrderResult> {
+    @Override
+    public OrderResult handleRequest(OrderRequest event, DurableContext ctx) {
+        var compensations = new ArrayList<Runnable>();
+        try {
+            // Step 1: Reserve inventory
+            var reservation = ctx.step("reserve-inventory", Reservation.class,
+                s -> inventoryService.reserve(event.getItems()));
+            compensations.add(() -> ctx.step("cancel-reservation", Void.class,
+                s -> { inventoryService.cancel(reservation.getId()); return null; }));
+
+            // Step 2: Charge payment
+            var payment = ctx.step("charge-payment", Payment.class,
+                s -> paymentService.charge(event.getPaymentMethod(), event.getAmount()));
+            compensations.add(() -> ctx.step("refund-payment", Void.class,
+                s -> { paymentService.refund(payment.getId()); return null; }));
+
+            // Step 3: Create shipment
+            var shipment = ctx.step("create-shipment", Shipment.class,
+                s -> shippingService.createShipment(event.getAddress(), event.getItems()));
+
+            return new OrderResult(true, shipment.getOrderId());
+        } catch (Exception e) {
+            ctx.getLogger().error("Order failed, executing compensations: {}", e.getMessage());
+            Collections.reverse(compensations);
+            for (var comp : compensations) {
+                try {
+                    comp.run();
+                } catch (Exception ce) {
+                    ctx.getLogger().error("Compensation failed", ce);
+                }
+            }
+            throw e;
+        }
+    }
+}
+```
+
 ## Unrecoverable Errors
 
 Mark errors as unrecoverable to stop execution immediately:
@@ -274,6 +360,25 @@ def handler(event: dict, context: DurableContext) -> dict:
     
     user = context.step(fetch_user_step())
     # Continue processing...
+```
+
+**Java:**
+
+```java
+public class MyHandler extends DurableHandler<MyInput, MyOutput> {
+    @Override
+    public MyOutput handleRequest(MyInput event, DurableContext ctx) {
+        var user = ctx.step("fetch-user", User.class, stepCtx -> {
+            var u = fetchUser(event.getUserId());
+            if (u == null) {
+                // Stop execution immediately - permanent failure, no retry
+                throw new IllegalStateException("User not found");
+            }
+            return u;
+        });
+        // Continue processing...
+    }
+}
 ```
 
 The SDK provides these exception types for different failure scenarios:

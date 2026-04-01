@@ -51,8 +51,8 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: myDurableFunction
-      Runtime: nodejs24.x  # or python3.14
-      Handler: index.handler
+      Runtime: nodejs24.x  # or python3.14 or java17 or java21
+      Handler: index.handler  # or com.example.MyHandler for Java
       Role: !GetAtt DurableFunctionRole.Arn
       Code:
         ZipFile: |
@@ -106,8 +106,8 @@ export class DurableFunctionStack extends cdk.Stack {
     super(scope, id, props);
 
     const durableFunction = new lambda.Function(this, 'DurableFunction', {
-      runtime: lambda.Runtime.NODEJS_24_X,  // or PYTHON_3_14
-      handler: 'index.handler',
+      runtime: lambda.Runtime.NODEJS_24_X,  // or PYTHON_3_14 or JAVA_17 or JAVA_21
+      handler: 'index.handler',  // or com.example.MyHandler for Java
       code: lambda.Code.fromAsset('lambda'),
       durableConfig: {
         executionTimeout: cdk.Duration.hours(1),
@@ -158,8 +158,8 @@ const functionLogGroup = new logs.LogGroup(this, 'DurableFunctionLogGroup', {
 
 // 2. Link to function
 const durableFunction = new lambda.Function(this, 'DurableFunction', {
-  runtime: lambda.Runtime.NODEJS_24_X,
-  handler: 'index.handler',
+  runtime: lambda.Runtime.NODEJS_24_X,  // or PYTHON_3_14 or JAVA_17 or JAVA_21
+  handler: 'index.handler',  // or com.example.MyHandler for Java
   code: lambda.Code.fromAsset('lambda'),
   logGroup: functionLogGroup,  // Link to managed log group
   durableConfig: {
@@ -209,8 +209,8 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: myDurableFunction
-      Runtime: nodejs24.x  # or python3.14
-      Handler: index.handler
+      Runtime: nodejs24.x  # or python3.14 or java17 or java21
+      Handler: index.handler  # or com.example.MyHandler for Java
       CodeUri: ./src
       DurableConfig:
         ExecutionTimeout: 3600

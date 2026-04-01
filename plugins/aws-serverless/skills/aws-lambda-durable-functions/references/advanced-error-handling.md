@@ -8,7 +8,7 @@ Advanced error handling patterns for durable functions, including timeout handli
 
 **Implementation approach:**
 
-1. Use `waitForCallback` (TypeScript) or `wait_for_callback` (Python) with a timeout configuration set in the config argument
+1. Use `waitForCallback` (TypeScript), `wait_for_callback` (Python), or `ctx.waitForCallback` (Java) with a timeout configuration set in the config argument
 2. Wrap in try-catch to handle timeout errors
 3. Check if the error is a timeout
 4. Implement fallback logic in a step (e.g., escalate to manager, use default value, retry with different parameters)
@@ -32,7 +32,10 @@ Advanced error handling patterns for durable functions, including timeout handli
 4. Execute fallback operation in a separate step
 
 **Important limitation:**
-In TypeScript, native setTimeout (and patterns like Promise.race using it) will fail during execution replays. To create a reliable timeout that persists across execution (expands over multi invocations), always use the timeout parameter provided by waitForCallback or waitForCondition
+In TypeScript, native setTimeout (and patterns like Promise.race using it) will fail during execution replays. To create a reliable timeout that persists across execution (expands over multi invocations), always use the timeout parameter provided by waitForCallback or waitForCondition.
+
+**Java considerations:**
+Java does not have an equivalent to Promise.race for local timeouts within a single invocation. Always use the timeout configuration in `CallbackConfig` or `WaitForConditionConfig` for reliable cross-invocation timeouts.
 
 ## Conditional Retry Based on Error Type
 
@@ -113,3 +116,9 @@ In TypeScript, native setTimeout (and patterns like Promise.race using it) will 
 - Callback timeouts - external system didn't respond in time
 - External system delays - service is slow or unresponsive
 - Long-running operations - operation exceeded expected duration
+
+**Exception types by language:**
+
+- **TypeScript**: Timeout errors thrown from `waitForCallback` or `waitForCondition`
+- **Python**: `CallbackError` for callback failures
+- **Java**: `CallbackTimeoutException`, `CallbackFailedException`, `WaitForConditionFailedException`

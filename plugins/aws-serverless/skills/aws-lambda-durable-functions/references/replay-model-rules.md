@@ -1,4 +1,6 @@
-# Replay Model Rules - CRITICAL
+# Replay Model Rules
+
+**Applies to:** TypeScript, Python, Java - CRITICAL
 
 The replay model is the foundation of durable functions. Violations cause subtle, hard-to-debug issues. **Read this carefully.**
 
@@ -51,6 +53,16 @@ now = datetime.now()                     # Different datetime each time
 context.step(lambda _: save_data({"id": id}), name='save')
 ```
 
+**Java:**
+
+```java
+// These values change on each replay!
+var id = UUID.randomUUID().toString();   // Different UUID each time
+var timestamp = System.currentTimeMillis(); // Different timestamp each time
+var random = Math.random();              // Different random number
+ctx.step("save", Void.class, s -> { saveData(id, timestamp); return null; });
+```
+
 ### ✅ CORRECT - Non-Deterministic Inside Steps
 
 **TypeScript:**
@@ -73,6 +85,15 @@ random_val = context.step(lambda _: random.random(), name='random')
 now = context.step(lambda _: datetime.now(), name='get-date')
 
 context.step(lambda _: save_data({"id": id}), name='save')
+```
+
+**Java:**
+
+```java
+var id = ctx.step("generate-id", String.class, s -> UUID.randomUUID().toString());
+var timestamp = ctx.step("get-time", Long.class, s -> System.currentTimeMillis());
+var random = ctx.step("random", Double.class, s -> Math.random());
+ctx.step("save", Void.class, s -> { saveData(id, timestamp); return null; });
 ```
 
 ### Must Be In Steps
@@ -115,6 +136,16 @@ def process(step_ctx: StepContext):
 context.step(process())
 ```
 
+**Java:**
+
+```java
+ctx.step("process", Result.class, stepCtx -> {
+    ctx.wait("delay", Duration.ofSeconds(1));      // ERROR! - Cannot nest in step
+    ctx.step("nested", String.class, s -> "");     // ERROR! - Cannot nest in step
+    return result;
+});
+```
+
 ### ✅ CORRECT - Use Child Context
 
 **TypeScript:**
@@ -139,6 +170,17 @@ def process_child(child_ctx: DurableContext):
     return step2
 
 context.run_in_child_context(func=process_child, name='process')
+```
+
+**Java:**
+
+```java
+ctx.runInChildContext("process", Result.class, childCtx -> {
+    childCtx.wait("processing-delay", Duration.ofSeconds(1));
+    var step1 = childCtx.step("validate", Data.class, s -> validate());
+    var step2 = childCtx.step("process", Result.class, s -> process(step1));
+    return step2;
+});
 ```
 
 ## Rule 3: Closure Mutations Are Lost
@@ -170,6 +212,17 @@ context.step(increment())
 print(counter)  # Always 0 on replay!
 ```
 
+**Java:**
+
+```java
+var counter = new AtomicInteger(0);
+ctx.step("increment", Void.class, s -> {
+    counter.incrementAndGet();  // This mutation is lost on replay!
+    return null;
+});
+System.out.println(counter.get());  // Always 0 on replay!
+```
+
 ### ✅ CORRECT - Return Values
 
 **TypeScript:**
@@ -186,6 +239,14 @@ console.log(counter);  // Correct value
 counter = 0
 counter = context.step(lambda _: counter + 1, name='increment')
 print(counter)  # Correct value
+```
+
+**Java:**
+
+```java
+int counter = 0;
+counter = ctx.step("increment", Integer.class, s -> counter + 1);
+System.out.println(counter);  // Correct value
 ```
 
 ## Rule 4: Side Effects Outside Steps Repeat
@@ -214,6 +275,14 @@ update_database(data)                # Updates multiple times!
 context.step(lambda _: process(), name='process')
 ```
 
+**Java:**
+
+```java
+System.out.println("Starting process");  // Prints multiple times!
+sendEmail(user.getEmail());              // Sends multiple emails!
+ctx.step("process", Result.class, s -> process());
+```
+
 ### ✅ CORRECT - Side Effects In Steps
 
 **TypeScript:**
@@ -233,6 +302,14 @@ context.logger.info('Starting process')  # Deduplicated automatically
 context.step(send_email(user.email))
 context.step(update_database(data))
 context.step(process())
+```
+
+**Java:**
+
+```java
+ctx.getLogger().info("Starting process");  // Deduplicated automatically
+ctx.step("send-email", Void.class, s -> { sendEmail(user.getEmail()); return null; });
+ctx.step("process", Result.class, s -> process());
 ```
 
 ### Exception: context.logger
