@@ -495,7 +495,7 @@ Add the SDK dependencies to your `pom.xml` with `LATEST` version property:
 
 ```xml
 <properties>
-  <aws-durable-execution-sdk-java.version>LATEST</aws-durable-execution-sdk-java.version>
+  <aws-durable-execution-sdk-java.version>VERSION</aws-durable-execution-sdk-java.version>
 </properties>
 
 <dependencies>
@@ -581,11 +581,12 @@ When starting a new durable function project:
 
 ### Java
 
-- [ ] Add SDK dependencies to `pom.xml` with version property set to `LATEST`
+- [ ] Add SDK dependencies to `pom.xml` with version property set to `VERSION`
 - [ ] Set Java compiler source/target to 17+ in `pom.xml`
 - [ ] Create handler class extending `DurableHandler<TInput, TOutput>`
 - [ ] Implement `handleRequest(TInput, DurableContext)` method
 - [ ] Add testing SDK dependency with `test` scope
+- [ ] Build project: `mvn clean install`
 - [ ] Write tests using `DurableFunctionTestRunner` from testing SDK
 - [ ] Run tests: `mvn test`
 - [ ] Review replay model rules (no non-deterministic code outside steps)

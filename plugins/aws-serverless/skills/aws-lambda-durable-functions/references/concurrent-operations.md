@@ -138,17 +138,24 @@ user, orders, preferences = results.get_results()
 **Java:**
 
 ```java
-// Use DurableFuture.allOf() for parallel heterogeneous operations
-var f1 = ctx.stepAsync("fetch-user", User.class, s -> fetchUser(userId));
-var f2 = ctx.stepAsync("fetch-orders", new TypeToken<List<Order>>() {}, s -> fetchOrders(userId));
-var f3 = ctx.stepAsync("fetch-preferences", Preferences.class, s -> fetchPreferences(userId));
+import software.amazon.lambda.durable.config.ParallelConfig;
 
-// Wait for all to complete
-DurableFuture.allOf(f1, f2, f3);
-
-var user = f1.get();
-var orders = f2.get();
-var preferences = f3.get();
+// Use ctx.parallel() for heterogeneous operations
+// AutoCloseable ensures all branches complete when exiting try block
+try (var parallel = ctx.parallel("parallel-ops", ParallelConfig.builder().maxConcurrency(3).build())) {
+    var f1 = parallel.branch("fetch-user", User.class, branchCtx -> 
+        branchCtx.step("fetch-user-step", User.class, s -> fetchUser(userId)));
+    var f2 = parallel.branch("fetch-orders", new TypeToken<List<Order>>() {}, branchCtx -> 
+        branchCtx.step("fetch-orders-step", new TypeToken<List<Order>>() {}, s -> fetchOrders(userId)));
+    var f3 = parallel.branch("fetch-preferences", Preferences.class, branchCtx -> 
+        branchCtx.step("fetch-prefs-step", Preferences.class, s -> fetchPreferences(userId)));
+    
+    // Branches complete automatically when try block exits (calls close() -> get())
+    // Access individual results
+    var user = f1.get();
+    var orders = f2.get();
+    var preferences = f3.get();
+}
 ```
 
 ## Completion Policies
@@ -607,6 +614,7 @@ results = context.map(
 **Java:**
 
 ```java
+import software.amazon.lambda.durable.config.WaitForCallbackConfig;
 import software.amazon.lambda.durable.config.CallbackConfig;
 
 var results = ctx.map("process-with-approval", items, ApprovalResult.class,
@@ -616,7 +624,11 @@ var results = ctx.map("process-with-approval", items, ApprovalResult.class,
         
         var approved = childCtx.waitForCallback("approval", ApprovalData.class,
             (callbackId, s) -> sendApproval(item, callbackId),
-            CallbackConfig.builder().timeout(Duration.ofHours(24)).build());
+            WaitForCallbackConfig.builder()
+                .callbackConfig(CallbackConfig.builder()
+                    .timeout(Duration.ofHours(24))
+                    .build())
+                .build());
         
         return new ApprovalResult(processed, approved);
     },

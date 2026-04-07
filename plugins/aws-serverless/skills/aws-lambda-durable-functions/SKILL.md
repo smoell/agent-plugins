@@ -96,7 +96,7 @@ pip install aws-durable-execution-sdk-python-testing
 
 ```xml
 <properties>
-  <aws-durable-execution-sdk-java.version>LATEST</aws-durable-execution-sdk-java.version>
+  <aws-durable-execution-sdk-java.version>VERSION</aws-durable-execution-sdk-java.version>
 </properties>
 
 <dependencies>
@@ -197,8 +197,18 @@ The Java SDK uses a class-based approach and type-safe patterns:
 - **Steps**: `ctx.step("name", ResultType.class, stepCtx -> operation())` - type must be specified
 - **Wait**: `ctx.wait("name", Duration.ofSeconds(n))` - always name waits for debugging
 - **Generic Types**: Use `TypeToken` for generic types like `List<T>`: `ctx.step("name", new TypeToken<List<User>>() {}, stepCtx -> ...)`
-- **Exceptions**: `StepFailedException`, `StepInterruptedException`, `CallbackTimeoutException`, `CallbackFailedException`
+- **Exceptions**:
+  - `StepFailedException` - Step execution failed (permanent, business logic error)
+  - `StepInterruptedException` - Step was interrupted (transient, can retry)
+  - `CallbackTimeoutException` - Callback didn't complete within timeout
+  - `CallbackFailedException` - Callback failed or was rejected
+  - `WaitForConditionFailedException` - Condition check failed or max attempts exceeded
+  - `InvokeFailedException` - Lambda invocation failed
+  - `InvokeTimedOutException` - Lambda invocation timed out
+  - `DurableExecutionException` - Base class for all SDK exceptions
 - **Testing**: Use `DurableFunctionTestRunner` class from testing SDK
+- **Async Operations**: `stepAsync()`, `invokeAsync()`, `waitAsync()`, `mapAsync()` return `DurableFuture<T>`
+- **Parallel Operations**: Use `parallel()` for heterogeneous operations or `DurableFuture.allOf()` / `DurableFuture.anyOf()`
 
 ### Invocation Requirements
 

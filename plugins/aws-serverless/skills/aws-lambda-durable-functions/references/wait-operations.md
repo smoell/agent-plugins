@@ -268,22 +268,34 @@ result = context.wait_for_condition(
 
 ```java
 import software.amazon.lambda.durable.config.WaitForConditionConfig;
-import software.amazon.lambda.durable.waits.WaitStrategies;
+import software.amazon.lambda.durable.model.WaitForConditionResult;
+import software.amazon.lambda.durable.exception.WaitForConditionFailedException;
+
+// Define state class for job polling
+record JobState(String jobId, String status) {}
 
 var finalState = ctx.waitForCondition("wait-for-job", JobState.class,
     (currentState, stepCtx) -> {
+        // Check current status and update state
         var status = checkJobStatus(currentState.getJobId());
-        return new JobState(currentState.getJobId(), status);
+        var newState = new JobState(currentState.getJobId(), status);
+        
+        // Decision logic: stop if completed, continue otherwise
+        if ("completed".equals(status)) {
+            return WaitForConditionResult.stopPolling(newState);
+        }
+        return WaitForConditionResult.continuePolling(newState);
     },
-    WaitForConditionConfig.builder()
+    WaitForConditionConfig.<JobState>builder()
         .initialState(new JobState("job-123", "pending"))
-        .waitStrategy(WaitStrategies.exponentialBackoff(b -> b
-            .maxAttempts(60)
-            .initialDelay(Duration.ofSeconds(5))
-            .maxDelay(Duration.ofSeconds(30))
-            .backoffRate(1.5)))
-        .shouldContinuePolling(state -> !"completed".equals(state.getStatus()))
-        .timeout(Duration.ofHours(1))
+        .waitStrategy((state, attempt) -> {
+            // Compute delay duration (not decision logic)
+            if (attempt >= 60) {
+                throw new WaitForConditionFailedException("Max polling attempts exceeded");
+            }
+            long delaySeconds = Math.min((long) (5 * Math.pow(1.5, attempt)), 30);
+            return Duration.ofSeconds(delaySeconds);
+        })
         .build());
 ```
 
@@ -354,24 +366,31 @@ result = context.wait_for_condition(
 **Java:**
 
 ```java
-import software.amazon.lambda.durable.waits.WaitForConditionResult;
+import software.amazon.lambda.durable.model.WaitForConditionResult;
+
+// Define state class
+record PollState(Data data, int attempts) {
+    boolean isReady() { return data != null && data.isReady(); }
+}
 
 var result = ctx.waitForCondition("custom-poll", PollState.class,
     (state, stepCtx) -> {
+        // Fetch data and update state
         var data = fetchData();
-        return new PollState(data, state.getAttempts() + 1);
+        var newState = new PollState(data, state.attempts() + 1);
+        
+        // Decision logic: stop if ready or max attempts
+        if (newState.isReady() || newState.attempts() >= 10) {
+            return WaitForConditionResult.stopPolling(newState);
+        }
+        return WaitForConditionResult.continuePolling(newState);
     },
-    WaitForConditionConfig.builder()
+    WaitForConditionConfig.<PollState>builder()
         .initialState(new PollState(null, 0))
         .waitStrategy((state, attempt) -> {
-            if (state.getAttempts() >= 10) {
-                return WaitForConditionResult.stopPolling();
-            }
-            var delay = Duration.ofSeconds(Math.min((long) Math.pow(2, attempt), 60));
-            boolean shouldContinue = state.getData() == null || !state.getData().isReady();
-            return shouldContinue 
-                ? WaitForConditionResult.continuePolling(delay)
-                : WaitForConditionResult.stopPolling();
+            // Compute exponential backoff delay (max 60 seconds)
+            long delaySeconds = Math.min((long) Math.pow(2, attempt), 60);
+            return Duration.ofSeconds(delaySeconds);
         })
         .build());
 ```
@@ -638,7 +657,11 @@ def handler(event: dict, context: DurableContext) -> dict:
 **Java:**
 
 ```java
-import software.amazon.lambda.durable.waits.WaitStrategies;
+import software.amazon.lambda.durable.model.WaitForConditionResult;
+import software.amazon.lambda.durable.exception.WaitForConditionFailedException;
+
+// Define state class for job polling
+record JobState(String jobId, String status, String result) {}
 
 public class JobHandler extends DurableHandler<JobRequest, JobResult> {
     @Override
@@ -648,21 +671,29 @@ public class JobHandler extends DurableHandler<JobRequest, JobResult> {
         
         var result = ctx.waitForCondition("poll-job", JobState.class,
             (state, stepCtx) -> {
-                var job = getJobStatus(state.getJobId());
-                return new JobState(state.getJobId(), job.getStatus(), job.getResult());
+                // Fetch current job status
+                var job = getJobStatus(state.jobId());
+                var newState = new JobState(state.jobId(), job.getStatus(), job.getResult());
+                
+                // Decision logic: stop if not running, continue otherwise
+                if (!"running".equals(newState.status())) {
+                    return WaitForConditionResult.stopPolling(newState);
+                }
+                return WaitForConditionResult.continuePolling(newState);
             },
-            WaitForConditionConfig.builder()
+            WaitForConditionConfig.<JobState>builder()
                 .initialState(new JobState(jobId, "running", null))
-                .waitStrategy(WaitStrategies.exponentialBackoff(b -> b
-                    .maxAttempts(60)
-                    .initialDelay(Duration.ofSeconds(5))
-                    .maxDelay(Duration.ofSeconds(30))
-                    .backoffRate(1.5)))
-                .shouldContinuePolling(state -> "running".equals(state.getStatus()))
-                .timeout(Duration.ofHours(2))
+                .waitStrategy((state, attempt) -> {
+                    // Compute delay with exponential backoff
+                    if (attempt >= 60) {
+                        throw new WaitForConditionFailedException("Max polling attempts exceeded");
+                    }
+                    long delaySeconds = Math.min((long) (5 * Math.pow(1.5, attempt)), 30);
+                    return Duration.ofSeconds(delaySeconds);
+                })
                 .build());
         
-        return result;
+        return new JobResult(result.jobId(), result.status(), result.result());
     }
 }
 ```

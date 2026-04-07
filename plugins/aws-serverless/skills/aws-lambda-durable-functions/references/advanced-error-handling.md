@@ -2,6 +2,11 @@
 
 Advanced error handling patterns for durable functions, including timeout handling, circuit breakers, and conditional retry strategies.
 
+**API Reference Conventions:**
+
+- TypeScript/Python: Method names reference the `context` object (e.g., `waitForCallback` means `context.waitForCallback`)
+- Java: Full reference with `ctx` prefix (e.g., `ctx.waitForCallback`) since Java uses `ctx` as the conventional variable name
+
 ## Timeout Handling with Callbacks
 
 **Pattern:** Wait for an external callback with a timeout, and implement fallback logic if the timeout is reached.
@@ -34,8 +39,29 @@ Advanced error handling patterns for durable functions, including timeout handli
 **Important limitation:**
 In TypeScript, native setTimeout (and patterns like Promise.race using it) will fail during execution replays. To create a reliable timeout that persists across execution (expands over multi invocations), always use the timeout parameter provided by waitForCallback or waitForCondition.
 
-**Java considerations:**
-Java does not have an equivalent to Promise.race for local timeouts within a single invocation. Always use the timeout configuration in `CallbackConfig` or `WaitForConditionConfig` for reliable cross-invocation timeouts.
+**Java equivalent - DurableFuture.anyOf:**
+Java provides `DurableFuture.anyOf()` for racing multiple async operations, similar to `Promise.race()` in TypeScript:
+
+```java
+// Race multiple async operations - first to complete wins
+var f1 = ctx.stepAsync("primary-api", Result.class, s -> callPrimaryAPI());
+var f2 = ctx.stepAsync("backup-api", Result.class, s -> callBackupAPI());
+
+// Wait for first to complete
+DurableFuture.anyOf(f1, f2);
+
+// Check which completed first
+Result result;
+try {
+    result = f1.get();
+    ctx.getLogger().info("Primary API completed first");
+} catch (Exception e) {
+    result = f2.get();
+    ctx.getLogger().info("Backup API completed first");
+}
+```
+
+For reliable cross-invocation timeouts that persist across replays, always use the timeout configuration in `CallbackConfig` or `WaitForConditionConfig`.
 
 ## Conditional Retry Based on Error Type
 
@@ -117,8 +143,61 @@ Java does not have an equivalent to Promise.race for local timeouts within a sin
 - External system delays - service is slow or unresponsive
 - Long-running operations - operation exceeded expected duration
 
-**Exception types by language:**
+## Exception Type Reference
 
-- **TypeScript**: Timeout errors thrown from `waitForCallback` or `waitForCondition`
-- **Python**: `CallbackError` for callback failures
-- **Java**: `CallbackTimeoutException`, `CallbackFailedException`, `WaitForConditionFailedException`
+Complete exception types by category and language:
+
+### TypeScript SDK Exceptions
+
+| Exception Type                 | Category         | Retryable | Use Case                                          |
+| ------------------------------ | ---------------- | --------- | ------------------------------------------------- |
+| `UnrecoverableInvocationError` | Permanent        | No        | Business logic failures (validation, not found)   |
+| `InvocationError`              | Transient        | Yes       | Infrastructure issues (Lambda retries invocation) |
+| `CallbackTimeoutError`         | Timeout          | No        | Callback didn't complete within timeout duration  |
+| `CallbackError`                | Callback Failure | No        | Callback failed or was explicitly rejected        |
+| `WaitForConditionTimeoutError` | Timeout          | No        | Condition polling exceeded timeout                |
+| `DurableExecutionsError`       | Base             | —         | Base class for all SDK exceptions                 |
+
+### Python SDK Exceptions
+
+| Exception Type           | Category         | Retryable | Use Case                                          |
+| ------------------------ | ---------------- | --------- | ------------------------------------------------- |
+| `ExecutionError`         | Permanent        | No        | Business logic failures (returns FAILED status)   |
+| `InvocationError`        | Transient        | Yes       | Infrastructure issues (Lambda retries invocation) |
+| `CallbackError`          | Callback Failure | No        | Callback handling failures                        |
+| `DurableExecutionsError` | Base             | —         | Base class for all SDK exceptions                 |
+
+### Java SDK Exceptions
+
+| Exception Type                    | Category          | Retryable | Use Case                                                |
+| --------------------------------- | ----------------- | --------- | ------------------------------------------------------- |
+| `StepFailedException`             | Permanent         | No        | Step execution failed (business logic error)            |
+| `StepInterruptedException`        | Transient         | Yes       | Step was interrupted (can retry)                        |
+| `CallbackTimeoutException`        | Timeout           | No        | Callback didn't complete within timeout duration        |
+| `CallbackFailedException`         | Callback Failure  | No        | Callback failed or was explicitly rejected              |
+| `WaitForConditionFailedException` | Condition Failure | No        | Condition check failed or max polling attempts exceeded |
+| `InvokeFailedException`           | Invoke Failure    | No        | Lambda invocation failed                                |
+| `InvokeTimedOutException`         | Timeout           | No        | Lambda invocation timed out                             |
+| `DurableExecutionException`       | Base              | —         | Base class for all SDK exceptions                       |
+
+### Usage Guidelines
+
+**Permanent failures** - Stop execution immediately, no retry:
+
+- Validation errors
+- Resource not found
+- Authentication failures
+- Business rule violations
+
+**Transient failures** - Retry with backoff:
+
+- Network timeouts
+- Service unavailable (503)
+- Rate limiting (429)
+- Database connection failures
+
+**Timeout failures** - Implement fallback logic:
+
+- Callback timeouts → escalate to manager, use default value
+- Condition timeouts → return partial results, notify operators
+- Wait timeouts → trigger alternative workflow

@@ -775,11 +775,9 @@ public class OrchestratorHandler extends DurableHandler<BatchEvent, List<BatchRe
     public List<BatchResult> handleRequest(BatchEvent event, DurableContext ctx) {
         var childArn = System.getenv("CHILD_FUNCTION_ARN");
         
-        // Invoke child workflows using async steps
-        var f1 = ctx.stepAsync("batch-1", BatchResult.class,
-            s -> ctx.invoke("invoke-1", childArn, event.getBatches().get(0), BatchResult.class));
-        var f2 = ctx.stepAsync("batch-2", BatchResult.class,
-            s -> ctx.invoke("invoke-2", childArn, event.getBatches().get(1), BatchResult.class));
+        // Invoke child workflows using invokeAsync (not stepAsync - cannot nest durable operations)
+        var f1 = ctx.invokeAsync("batch-1", childArn, event.getBatches().get(0), BatchResult.class);
+        var f2 = ctx.invokeAsync("batch-2", childArn, event.getBatches().get(1), BatchResult.class);
         
         // Wait for all child invocations to complete
         DurableFuture.allOf(f1, f2);

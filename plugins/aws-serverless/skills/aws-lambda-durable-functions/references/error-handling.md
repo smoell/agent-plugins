@@ -280,6 +280,8 @@ def handler(event: dict, context: DurableContext) -> dict:
 **Java:**
 
 ```java
+import software.amazon.lambda.durable.exceptions.DurableExecutionException;
+
 public class OrderHandler extends DurableHandler<OrderRequest, OrderResult> {
     @Override
     public OrderResult handleRequest(OrderRequest event, DurableContext ctx) {
@@ -302,13 +304,13 @@ public class OrderHandler extends DurableHandler<OrderRequest, OrderResult> {
                 s -> shippingService.createShipment(event.getAddress(), event.getItems()));
 
             return new OrderResult(true, shipment.getOrderId());
-        } catch (Exception e) {
+        } catch (DurableExecutionException e) {
             ctx.getLogger().error("Order failed, executing compensations: {}", e.getMessage());
             Collections.reverse(compensations);
             for (var comp : compensations) {
                 try {
                     comp.run();
-                } catch (Exception ce) {
+                } catch (DurableExecutionException ce) {
                     ctx.getLogger().error("Compensation failed", ce);
                 }
             }
